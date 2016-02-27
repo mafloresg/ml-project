@@ -1,0 +1,135 @@
+---
+title: "Machine Learning hands on project"
+author: "Maria A. Flores"
+date: "26 February 2016"
+output:
+  html_document:
+    keep_md: yes
+    pandoc_args:
+    - +RTS
+    - -K64m
+    - -RTS
+    theme: journal
+    toc: yes
+---
+<br><br>
+
+## Synopsis
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, the goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: [link] (http://groupware.les.inf.puc-rio.br/har) (see the section on the Weight Lifting Exercise Dataset). The goal of the project is to predict the manner in which they did the exercise. This is the _classe_ variable in the training set.  
+<br><br>
+
+## Data processing
+<br><br>
+
+### Environment settings
+The first step was to set the locale into English and load some required libraries. The working directory was stablished too, but I found it was pointless to add the code for my own directory. If you are going to execute this in your computer, just remember to set your own working directory.
+
+```{r "Presettings", message = FALSE, warning = FALSE, results = "hide"}
+Sys.setlocale("LC_ALL","en_GB.UTF-8");
+
+library(dplyr)
+library(caret)
+library(ElemStatLearn)
+```
+<br><br>
+
+### Download and import the data into R
+Check if the files are downloaded and load the data into variables. As I took a look at the csv files previously, I knew there were values "#DIV/0!" and decided to treat them as NAs.
+```{r "downloadAndImport", cache = TRUE}
+if (!file.exists("pml-training.csv")){
+    fileUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv";
+    download.file(fileUrl, destfile="pml-training.csv", method="curl");
+}
+
+if (!file.exists("pml-testing.csv")){
+    fileUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv";
+    download.file(fileUrl, destfile="pml-testing.csv", method="curl");
+}
+
+trainSet <- read.csv("pml-training.csv", na.strings= c("NA","#DIV/0!"));
+testSet <- read.csv("pml-testing.csv", na.strings= c("NA","#DIV/0!"));
+```
+  
+<br><br>
+### Exploratory analysis
+In the data set there are 160 variables. The firsts columns are the row order, the user name and information about the time window and timestamp in which the exercise was done. I decided not to use any of these variables in the analysis, taking them as merely circumstantial. The next variables are related to the recorded movement itself, and all of them can be potentially useful. There are some variables with lots of NAs values, which I interpret as summarised values, as only have values where the _new_window_ variable is "yes". So, I could have used them as summarised values and apply the same value to all the rows for the same window, or I could have chosen not to use the values. I decided the latest, as I take is as a more cautious approach.
+
+```{r "Exploratory1", warning=FALSE}
+dim(trainSet);
+dim(testSet);
+summary(trainSet);
+```
+
+## Data cleaning
+From the original training data, I created a new data set following the guidelines:
+ 
+ * I don't want the first columns related to users, time and sliding windows.
+ 
+ * I don't want the variables with near-zero information in it. 
+ 
+ * I don't want the variables with high percentage of NAs.
+
+```{r "DataCleaning", warning = FALSE}
+redTrainSet <- trainSet[8:160]
+
+# Deleting NZV columns
+valuesToDelete <- nearZeroVar(redTrainSet, saveMetrics=TRUE)
+cleanSet.1 <- redTrainSet[,!valuesToDelete$nzv]
+
+# Deleting columns > 95% NAs
+varsStay <- TRUE;
+
+for(i in names(cleanSet.1)) {
+    varsStay <- append(varsStay, 
+                       ifelse(sum(is.na(cleanSet.1[i]))/length(cleanSet.1[,i]) <= 0.95, 
+                              TRUE, FALSE))
+}
+
+cleanSet <- cleanSet.1[,varsStay[2:length(varsStay)]]
+```
+
+## ML model
+
+### Model fit
+I have a reduced data set with 52 potentially useful covariates and the _classe_ column, which is the value we want to predict. This is a problem that can have a good solution with Random Forest algorithm and, in fact, the original paper's authors (see references) used a Random Forest to predict the quality of the movement.
+
+```{r "ModelFit", warning = FALSE, cache = TRUE}
+# Split the training set into training and test sets for cross-validation
+set.seed(1234)
+inTrain <- createDataPartition(y=cleanSet$classe, p=0.8, list=FALSE)
+cleanTrain <- cleanSet[inTrain,]
+cleanTest <- cleanSet[-inTrain,]
+dim(cleanTrain)
+dim(cleanTest)
+
+# Random Forest model fit
+modelFit.rf <- train(classe ~ ., method="rf", data=cleanTrain)
+varImp(modelFit.rf, useModel=TRUE)
+```
+<br><br>
+
+### Model evaluation
+Using the test set that I have created before, the accuracy on predicting the _classe_ is nearly 99.7%
+```{r "ModelEval", warning=FALSE}
+prediction.rf <- predict(modelFit.rf, cleanTest)
+confusionMatrix(prediction.rf, cleanTest$classe)
+```
+<br><br>
+
+### Prediction
+```{r "Prediction", warning=FALSE}
+cleanTestPred.1 <- testSet[8:160]
+cleanTestPred.1 <- cleanTestPred.1[,!valuesToDelete$nzv]
+cleanTestPred <- cleanTestPred.1[,varsStay[2:length(varsStay)]]
+prediction <- predict(modelFit.rf, cleanTestPred)
+prediction
+```
+<br><br>
+
+## References
+1. "Human activity recognition" [link](http://groupware.les.inf.puc-rio.br/har)
+
+2. "Qualitative activity recognition of weight lifting exercises" 
+Velloso, Bulling, Gellersen, Ugulino, Fuks. 2013
+[link](http://groupware.les.inf.puc-rio.br/work.jsf?p1=11201)
